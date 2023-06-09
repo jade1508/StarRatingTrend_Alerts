@@ -1,0 +1,210 @@
+create or replace table `datalake.StarRatingTrend_Alerts` 
+partition by date_trunc(date, month)
+cluster by brand
+as 
+
+
+with date_data as (
+  select
+    distinct date.full_date date,
+    his.asin, 
+    his.child_category,
+  from  `datalake.dim_date` date
+  join ( 
+    select distinct asin, is_elevate_asin, child_category 
+    from `datalake.fact_bsr_historical_data`
+    WHERE 1=1
+      and is_elevate_asin  
+      and child_category !='Na') his
+  on full_date between current_date()-31 and current_date()-1
+  order by 1 desc
+  )
+
+, asin_data as (
+  select d.*, 
+  his.* except(asin,child_category,batch_date)
+  from date_data d
+  left join `datalake.fact_bsr_historical_data` his
+  on 1=1
+    and d.date=his.batch_date 
+    and d.asin=his.asin  
+    and d.child_category=his.child_category
+  order by date desc
+  )
+
+, partition_table as(
+  SELECT
+  *,
+  ROW_NUMBER() OVER(PARTITION BY asin, child_category order by date desc) as num,
+  FROM  asin_data
+  order by date desc
+  )
+
+, pivot_rating as (
+  select *
+  FROM (select current_date()-1 date, asin, child_category, root_category, rating, brand, description, parent_asin, num FROM partition_table)
+  PIVOT(max(rating) FOR num IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31))
+  )
+
+, pivot_reviews as (
+  select *
+  FROM (select num, brand, child_category, asin, parent_asin, reviews_count,  current_date()-1 date FROM partition_table)
+  PIVOT(sum(reviews_count) FOR num IN (1))
+  )
+
+--ADDING ITEM NAME FROM LISTING TABLE --REPLACE WITH NEW CATELOGUE
+, listing as (
+  select distinct asin1,
+  item_name,
+  extract(DATE from ReportstartDate) listDate
+  from `datalake.alllistingsreport_consolidated`
+  where extract(DATE from ReportstartDate) = current_date()-1
+  and marketplaceName='US'
+  )
+
+, submain as (
+  select 
+    listing.item_name,
+    pivot_rating.brand,
+    pivot_rating.description,
+    pivot_rating.asin,
+    pivot_rating.parent_asin,
+    pivot_rating.date,
+    max(coalesce(pivot_rating._1,0)) as current_rating,
+    max(coalesce(pivot_rating._2,0)) as day_1_rating,
+    max(coalesce(pivot_rating._3,0)) as day_2_rating,
+    max(coalesce(pivot_rating._4,0)) as day_3_rating,
+    max(coalesce(pivot_rating._5,0)) as day_4_rating,
+    max(coalesce(pivot_rating._6,0)) as day_5_rating,
+    max(coalesce(pivot_rating._7,0)) as day_6_rating,
+    max(coalesce(pivot_rating._8,0)) as day_7_rating,
+    max(coalesce(pivot_rating._9,0)) as day_8_rating,
+    max(coalesce(pivot_rating._10,0)) as day_9_rating,
+    max(coalesce(pivot_rating._11,0)) as day_10_rating,
+    max(coalesce(pivot_rating._12,0)) as day_11_rating,
+    max(coalesce(pivot_rating._13,0)) as day_12_rating,
+    max(coalesce(pivot_rating._14,0)) as day_13_rating,
+    max(coalesce(pivot_rating._15,0)) as day_14_rating,
+    max(coalesce(pivot_rating._16,0)) as day_15_rating,
+    max(coalesce(pivot_rating._17,0)) as day_16_rating,
+    max(coalesce(pivot_rating._18,0)) as day_17_rating,
+    max(coalesce(pivot_rating._19,0)) as day_18_rating,
+    max(coalesce(pivot_rating._20,0)) as day_19_rating,
+    max(coalesce(pivot_rating._21,0)) as day_20_rating,
+    max(coalesce(pivot_rating._22,0)) as day_21_rating,
+    max(coalesce(pivot_rating._23,0)) as day_22_rating,
+    max(coalesce(pivot_rating._24,0)) as day_23_rating,
+    max(coalesce(pivot_rating._25,0)) as day_24_rating,
+    max(coalesce(pivot_rating._26,0)) as day_25_rating,
+    max(coalesce(pivot_rating._27,0)) as day_26_rating,
+    max(coalesce(pivot_rating._28,0)) as day_27_rating,
+    max(coalesce(pivot_rating._29,0)) as day_28_rating,
+    max(coalesce(pivot_rating._30,0)) as day_29_rating,
+    max(coalesce(pivot_rating._31,0)) as day_30_rating,
+    max(coalesce(pivot_reviews._1,0)) as current_reviews
+  from pivot_rating
+  left join pivot_reviews
+  on 1=1
+    and pivot_reviews.date=pivot_rating.date 
+    and pivot_reviews.child_category=pivot_rating.child_category 
+    and pivot_reviews.parent_asin=pivot_rating.parent_asin
+    and pivot_reviews.asin=pivot_rating.asin 
+  left join listing --REPLACE WITH NEW CATELOGUE
+  on pivot_rating.parent_asin=listing.asin1
+  where pivot_rating.brand is not null
+  group by 1,2,3,4,5,6
+  order by date desc
+  )
+
+--MAIN SELECT
+, main as (
+  SELECT
+    *,
+    coalesce(current_rating,day_1_rating,day_2_rating,day_3_rating) AS today,
+    coalesce(day_1_rating,day_2_rating,day_3_rating,day_4_rating) AS day_1,
+    coalesce(day_2_rating,day_3_rating,day_4_rating,day_5_rating) AS day_2,
+    coalesce(day_3_rating,day_4_rating,day_5_rating,day_6_rating) AS day_3,
+    coalesce(day_4_rating,day_5_rating,day_6_rating,day_7_rating) AS day_4,
+    coalesce(day_5_rating,day_6_rating,day_7_rating,day_8_rating) AS day_5,
+    coalesce(day_6_rating,day_7_rating,day_8_rating,day_9_rating) AS day_6,
+    coalesce(day_7_rating,day_8_rating,day_9_rating,day_10_rating) AS day_7,
+    coalesce(day_8_rating,day_9_rating,day_10_rating,day_11_rating) AS day_8,
+    coalesce(day_9_rating,day_10_rating,day_11_rating,day_12_rating) AS day_9,
+    coalesce(day_10_rating,day_11_rating,day_12_rating,day_13_rating) AS day_10,
+    coalesce(day_11_rating,day_12_rating,day_13_rating,day_14_rating) AS day_11,
+    coalesce(day_12_rating,day_13_rating,day_14_rating,day_15_rating) AS day_12,
+    coalesce(day_13_rating,day_14_rating,day_15_rating,day_16_rating) AS day_13,
+    coalesce(day_14_rating,day_15_rating,day_16_rating,day_17_rating) AS day_14,
+    coalesce(day_15_rating,day_16_rating,day_17_rating,day_18_rating) AS day_15,
+    coalesce(day_16_rating,day_17_rating,day_18_rating,day_19_rating) AS day_16,
+    coalesce(day_17_rating,day_18_rating,day_19_rating,day_20_rating) AS day_17,
+    coalesce(day_18_rating,day_19_rating,day_20_rating,day_21_rating) AS day_18,
+    coalesce(day_19_rating,day_20_rating,day_21_rating,day_22_rating) AS day_19,
+    coalesce(day_20_rating,day_21_rating,day_22_rating,day_23_rating) AS day_20,
+    coalesce(day_21_rating,day_22_rating,day_23_rating,day_24_rating) AS day_21,
+    coalesce(day_22_rating,day_23_rating,day_24_rating,day_25_rating) AS day_22,
+    coalesce(day_23_rating,day_24_rating,day_25_rating,day_26_rating) AS day_23,
+    coalesce(day_24_rating,day_25_rating,day_26_rating,day_27_rating) AS day_24,
+    coalesce(day_25_rating,day_26_rating,day_27_rating,day_28_rating) AS day_25,
+    coalesce(day_26_rating,day_27_rating,day_28_rating,day_29_rating) AS day_26,
+    coalesce(day_27_rating,day_28_rating,day_29_rating,day_30_rating) AS day_27,
+    coalesce(day_28_rating,day_29_rating,day_30_rating) AS day_28,
+    coalesce(day_29_rating,day_30_rating) AS day_29,
+    day_30_rating AS day_30,
+    (SELECT MAX(x) FROM UNNEST([current_rating, day_1_rating, day_2_rating, day_3_rating, day_4_rating, day_5_rating, day_6_rating]) x) AS max_day0to6,
+    (SELECT MIN(x) FROM UNNEST([current_rating, day_1_rating, day_2_rating, day_3_rating, day_4_rating, day_5_rating, day_6_rating]) x where x != 0) AS min_day0to6,
+    (SELECT MAX(x) FROM UNNEST([day_7_rating, day_8_rating, day_9_rating, day_10_rating, day_11_rating, day_12_rating, day_13_rating, day_14_rating, day_15_rating, day_16_rating, day_17_rating, day_18_rating, day_19_rating, day_20_rating, day_21_rating, day_22_rating, day_23_rating, day_24_rating, day_25_rating, day_26_rating, day_27_rating, day_28_rating, day_29_rating, day_30_rating]) x) AS max_day7to30,
+    (SELECT MIN(x) FROM UNNEST([day_7_rating, day_8_rating, day_9_rating, day_10_rating, day_11_rating, day_12_rating, day_13_rating, day_14_rating, day_15_rating, day_16_rating, day_17_rating, day_18_rating, day_19_rating, day_20_rating, day_21_rating, day_22_rating, day_23_rating, day_24_rating, day_25_rating, day_26_rating, day_27_rating, day_28_rating, day_29_rating, day_30_rating]) x where x != 0) AS min_day7to30
+  from submain
+  )
+
+--FINAL SELECT
+select
+  date,
+  brand,
+  description AS asin_shortname,
+  asin,
+  parent_asin,
+  current_reviews,
+  today, day_1, day_2, day_3, day_4, day_5, day_6, day_7, day_8, day_9, day_10,
+  day_11, day_12, day_13, day_14, day_15, day_16, day_17, day_18, day_19, day_20,
+  day_21, day_22, day_23, day_24, day_25, day_26, day_27, day_28, day_29, day_30,
+  CASE WHEN coalesce(today,0) >= 4.8 THEN 5
+    WHEN coalesce(today,0) >= 4.3 AND coalesce(today,0) < 4.8 THEN 4.5
+    WHEN coalesce(today,0) >= 3.8 AND coalesce(today,0) < 4.3 THEN 4
+    WHEN coalesce(today,0) >= 3.3 AND coalesce(today,0) < 3.8 THEN 3.5
+    WHEN coalesce(today,0) >= 2.8 AND coalesce(today,0) < 3.3 THEN 3
+    WHEN coalesce(today,0) >= 2.3 AND coalesce(today,0) < 2.8 THEN 2.5
+    WHEN coalesce(today,0) >= 1.8 AND coalesce(today,0) < 2.3 THEN 2
+    WHEN coalesce(today,0) >= 1.3 AND coalesce(today,0) < 1.8 THEN 1.5
+    WHEN coalesce(today,0) > 0 AND coalesce(today,0) < 1.3 THEN 1
+    ELSE 0
+  END AS visual_star,
+  CASE WHEN max_day0to6 = 0 OR day_7 = 0 /*OR min_day0to6 > 5*/ THEN NULL
+    WHEN min_day0to6 = day_7 OR max_day0to6 = day_7 THEN NULL
+    WHEN max_day0to6 > day_7 THEN "Uplift"
+    WHEN min_day0to6 < day_7 THEN "Drop"
+    ELSE NULL
+  END AS recent_change,
+  CASE WHEN max_day0to6 = 0 OR day_7 = 0 /*OR min_day0to6 > 5*/ THEN 0
+    WHEN max_day0to6 > day_7 THEN ROUND( max_day0to6 - day_7,1)  
+    WHEN min_day0to6 < day_7 THEN ROUND(min_day0to6 - day_7,1)
+    ELSE NULL
+  END AS recent_change_delta,
+  CASE WHEN max_day0to6 = 0 OR day_7 = 0 OR day_7 IS NULL THEN NULL
+    WHEN today < day_1 AND today IN (4.7, 4.2, 3.7, 3.2, 2.7, 2.2, 1.7, 1.2) THEN "Star Drop"
+    WHEN today > day_1 AND today IN (4.8, 4.3, 3.8, 3.3, 2.8, 2.3, 1.8, 1.3) THEN "Star Up"
+    ELSE NULL
+  END AS recent_star_alert,
+  CASE WHEN max_day0to6 = 0 OR max_day7to30 = 0 /*OR min_day0to6 > 5 OR min_day7to30 > 5*/ THEN NULL
+    WHEN max_day0to6 > max_day7to30 THEN "Uplift" 
+    WHEN min_day0to6 < min_day7to30 OR max_day0to6 < max_day7to30 THEN "Drop"
+    ELSE NULL
+  END AS long_term_change,
+  CASE WHEN max_day0to6 = 0 OR max_day7to30 = 0 /*OR min_day0to6 > 5 OR min_day7to30 > 5*/ THEN NULL
+    WHEN max_day0to6 > max_day7to30 THEN ROUND(max_day0to6 - max_day7to30,1)  
+    WHEN min_day0to6 < min_day7to30 THEN ROUND(min_day0to6 - min_day7to30,1)
+    WHEN max_day0to6 < max_day7to30 THEN ROUND(max_day0to6 - max_day7to30,1)
+    ELSE NULL
+  END AS long_term_delta
+from main
