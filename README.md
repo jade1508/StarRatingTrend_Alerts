@@ -1,7 +1,7 @@
 # StarRatingTrend_Alerts
 
-The dashboard is used to track the historical ratings of listings (parent level) over the last 30 days. This dashboard would also highlight drops and uplifts for Brand Managers to act upon.
-It replaces for receiving email alerts when there are star rating changes via Santrykit with the high number of email alerts, it can be difficult to keep track of changes or review historical data.
+The dashboard is used to track the historical ratings of listings over the last 30 days and highlight any drops or increases for actionable insights. 
+It replaces the need to receive email alerts for star rating changes via Santrykit. With the high volume of email alerts, it can be difficult to keep track of changes or review historical data.
 The dashboard displays the current number of reviews and star rating at both the Parent ASIN level and subcategory level (TBD) during a 31-day time period including current day.
 
 * Recent Change: Change of star rating in the last 7 days, showing 'Drop' or 'Uplift'
